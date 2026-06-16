@@ -105,15 +105,22 @@ resume_file="$cwd/.ai/harness/handoff/resume.md"
 SELF_DIR="$(cd "$(dirname "$0")" 2>/dev/null && pwd)"
 handoff_gen="$SELF_DIR/lib/rollover-handoff.py"
 [ -f "$handoff_gen" ] || handoff_gen="$CONFIG_DIR/hooks/lib/rollover-handoff.py"
-handoff_file="$LATCH_DIR/handoff-$hash.md"
+# repo-local, stable, visible path (like repo-harness's resume.md)
+handoff_rel="${HUD_ROLLOVER_HANDOFF_PATH:-.claude/rollover-handoff.md}"
+handoff_file="$cwd/$handoff_rel"
 
 if [ -n "${HUD_ROLLOVER_SEED:-}" ]; then
   seed="$HUD_ROLLOVER_SEED"
 elif [ -f "$resume_file" ]; then
   seed="The previous session reached ${used}% context and handed off to this window. First read .ai/harness/handoff/resume.md and tasks/current.md, reconcile against the live repo (active plan, git status), then continue from the next step. Do not redo completed work."
-elif [ -f "$handoff_gen" ] && "$PY" "$handoff_gen" "$transcript" "$cwd" "$used" "$handoff_file" >/dev/null 2>&1 && [ -s "$handoff_file" ]; then
-  # self-contained handoff written from the transcript + git state
-  seed="The previous session reached ${used}% context and handed off to this window. First read the handoff file at $handoff_file (it captures the task, recent actions, files touched, and the git diff), then continue the in-progress work from where it left off. Do not redo completed work."
+elif [ -f "$handoff_gen" ] && mkdir -p "$(dirname "$handoff_file")" 2>/dev/null && "$PY" "$handoff_gen" "$transcript" "$cwd" "$used" "$handoff_file" >/dev/null 2>&1 && [ -s "$handoff_file" ]; then
+  # self-contained handoff written into the repo (transcript + git state).
+  # Keep git clean without touching a tracked .gitignore: use .git/info/exclude.
+  if [ -d "$cwd/.git" ] && [ -z "${HUD_ROLLOVER_NO_GITIGNORE:-}" ]; then
+    excl="$cwd/.git/info/exclude"
+    grep -qxF "$handoff_rel" "$excl" 2>/dev/null || printf '%s\n' "$handoff_rel" >> "$excl" 2>/dev/null || true
+  fi
+  seed="The previous session reached ${used}% context and handed off to this window. First read the handoff file ./$handoff_rel (it captures the task, recent actions, files touched, and the git diff), then continue the in-progress work from where it left off. Do not redo completed work."
 else
   seed="The previous session reached ${used}% context and handed off to this window. Reconstruct where it left off from git log/status and the uncommitted diff, then continue from the next step. Do not redo completed work."
 fi

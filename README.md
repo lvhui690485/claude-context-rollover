@@ -31,8 +31,10 @@ not memory. The hook picks the richest handoff available, in this order:
    continuously and injects it on `SessionStart`), the new session is pointed at
    it plus `tasks/current.md`. Most precise.
 3. **Self-contained handoff (built in, no dependencies)** — otherwise the hook
-   reads the **current session's transcript** and writes
-   `~/.claude/state/hud-rollover/handoff-<id>.md` capturing:
+   reads the **current session's transcript** and writes a markdown handoff into
+   the repo at **`.claude/rollover-handoff.md`** (like repo-harness's `resume.md`
+   — a stable, visible, reviewable file that travels with the project),
+   capturing:
    - the most recent **human requests** (the actual task intent),
    - the previous session's **last message** (usually "next I'll…"),
    - **recent actions** and the **files it edited**,
@@ -42,8 +44,10 @@ not memory. The hook picks the richest handoff available, in this order:
    half-finished refactor in a plain repo rolls over with the task, the plan,
    and the diff intact.
 
-This file lives outside your repo (under `~/.claude/state/`), so it never
-pollutes your working tree or git.
+   To keep `git status` clean, the path is added to `.git/info/exclude` (a local,
+   untracked ignore — your tracked `.gitignore` is never modified). Change the
+   path with `HUD_ROLLOVER_HANDOFF_PATH`, or skip the exclude with
+   `HUD_ROLLOVER_NO_GITIGNORE=1`.
 
 ---
 
@@ -121,6 +125,8 @@ Set env vars in the hook command inside `~/.claude/settings.json`
 | `HUD_ROLLOVER_COOLDOWN` | `180` | Min seconds between spawns, globally |
 | `HUD_ROLLOVER_MAX_BURST` | `5` | Spawns within 10 min that auto-trip the kill switch |
 | `HUD_ROLLOVER_SEED` | _(auto)_ | Override the seed prompt for the new session |
+| `HUD_ROLLOVER_HANDOFF_PATH` | `.claude/rollover-handoff.md` | Repo-relative path for the generated handoff |
+| `HUD_ROLLOVER_NO_GITIGNORE` | _off_ | Don't add the handoff path to `.git/info/exclude` |
 | `HUD_ROLLOVER_REFRESH_HANDOFF` | _off_ | Run a repo handoff refresher before spawning (repo-harness) |
 | `HUD_ROLLOVER_DRYRUN=1` | _off_ | Decide + log to stderr, but never spawn or stop |
 | `HUD_ROLLOVER_DISABLE=1` | _off_ | Hard off for that invocation |
