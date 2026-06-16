@@ -6,12 +6,15 @@
 # claude-hud cache so nothing touches your real Claude Code state.
 #
 set -u
-HOOK="$(cd "$(dirname "$0")/.." && pwd)/hooks/hud-context-rollover.sh"
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+HOOK="$ROOT/hooks/hud-context-rollover.sh"
+SS="$ROOT/hooks/session-start-handoff.sh"
 pass=0; fail=0
 ok(){ echo "  ✅ $1"; pass=$((pass+1)); }
 no(){ echo "  ❌ $1"; fail=$((fail+1)); }
 
-bash -n "$HOOK" && ok "syntax" || no "syntax"
+bash -n "$HOOK" && ok "rollover syntax" || no "rollover syntax"
+bash -n "$SS" && ok "session-start syntax" || no "session-start syntax"
 
 T="$(mktemp -d)"; faketx="$T/s.jsonl"; : > "$faketx"
 h=$(printf '%s' "$faketx" | shasum -a 256 | awk '{print $1}')
@@ -68,6 +71,19 @@ grep -q "REFACTOR_TASK_MARKER" "$hf" 2>/dev/null && ok "task captured in handoff
 grep -q "src/auth/login.ts" "$hf" 2>/dev/null && ok "edited file captured" || no "file missing"
 echo "$nc" | grep -q ".claude/rollover-handoff.md" && ok "seed points at repo handoff" || no "seed missing handoff path"
 grep -qxF ".claude/rollover-handoff.md" "$REPO/.git/info/exclude" 2>/dev/null && ok "added to .git/info/exclude (git stays clean)" || no "not git-excluded"
+
+echo "H) SessionStart injects a fresh handoff once, skips stale/consumed"
+ssrun(){ printf '{"cwd":"%s","session_id":"%s","source":"startup"}' "$REPO" "$1"; }
+# fresh handoff from G is present; first start should inject it
+out=$(ssrun h1 | CLAUDE_CONFIG_DIR="$T" bash "$SS" 2>/dev/null)
+echo "$out" | grep -q "additionalContext" && echo "$out" | grep -q "REFACTOR_TASK_MARKER" && ok "injects handoff into context" || no "did not inject"
+# second start (same mtime) → consumed, no inject
+out2=$(ssrun h2 | CLAUDE_CONFIG_DIR="$T" bash "$SS" 2>/dev/null)
+[ -z "$out2" ] && ok "consume-once: second start no inject" || no "re-injected"
+# stale handoff (old mtime) → skip
+touch -t 202001010000 "$hf"; rm -f "$T/state/hud-rollover/injected-"*
+out3=$(ssrun h3 | CLAUDE_CONFIG_DIR="$T" HUD_ROLLOVER_INJECT_MAXAGE=900 bash "$SS" 2>/dev/null)
+[ -z "$out3" ] && ok "freshness: stale handoff skipped" || no "injected stale handoff"
 
 rm -rf "$T"
 echo "-----"

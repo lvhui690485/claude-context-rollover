@@ -18,24 +18,30 @@ import json, os
 settings = os.environ["SETTINGS"]
 with open(settings) as f:
     data = json.load(f)
-arr = data.get("hooks", {}).get("PostToolUse", [])
-def is_ours(entry):
-    return any("hud-context-rollover.sh" in (h.get("command") or "")
-               for h in entry.get("hooks", []))
-kept = [e for e in arr if not is_ours(e)]
-if "PostToolUse" in data.get("hooks", {}):
+hooks = data.get("hooks", {})
+
+def strip(event, needle):
+    arr = hooks.get(event)
+    if not arr:
+        return
+    kept = [e for e in arr
+            if not any(needle in (h.get("command") or "") for h in e.get("hooks", []))]
     if kept:
-        data["hooks"]["PostToolUse"] = kept
+        hooks[event] = kept
     else:
-        del data["hooks"]["PostToolUse"]
+        del hooks[event]
+
+strip("PostToolUse", "hud-context-rollover.sh")
+strip("SessionStart", "session-start-handoff.sh")
 with open(settings, "w") as f:
     json.dump(data, f, indent=2, ensure_ascii=False)
     f.write("\n")
-print("→ removed PostToolUse registration from settings.json")
+print("→ removed PostToolUse + SessionStart registrations from settings.json")
 PY
 fi
 
 rm -f "$DEST" 2>/dev/null && echo "→ removed $DEST" || true
+rm -f "$CONFIG_DIR/hooks/session-start-handoff.sh" 2>/dev/null || true
 rm -f "$CONFIG_DIR/hooks/lib/rollover-handoff.py" 2>/dev/null || true
 rmdir "$CONFIG_DIR/hooks/lib" 2>/dev/null || true
 echo "✅ uninstalled. State/logs left under $CONFIG_DIR/state/hud-rollover/ (delete manually if you want)."

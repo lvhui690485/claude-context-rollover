@@ -40,14 +40,25 @@ not memory. The hook picks the richest handoff available, in this order:
    - **recent actions** and the **files it edited**,
    - the **git diff/status** at the moment of handoff (the in-progress work).
 
-   The new session is told to read that file first, then continue. So even a
-   half-finished refactor in a plain repo rolls over with the task, the plan,
-   and the diff intact.
+   So even a half-finished refactor in a plain repo rolls over with the task,
+   the plan, and the diff intact.
 
    To keep `git status` clean, the path is added to `.git/info/exclude` (a local,
    untracked ignore — your tracked `.gitignore` is never modified). Change the
    path with `HUD_ROLLOVER_HANDOFF_PATH`, or skip the exclude with
    `HUD_ROLLOVER_NO_GITIGNORE=1`.
+
+### Two ways the new session gets it
+
+- **Auto-injected (SessionStart hook).** A companion `SessionStart` hook
+  (`session-start-handoff.sh`, installed automatically) reads the fresh handoff
+  and injects it straight into the new session's context — so continuation does
+  **not** depend on the seed prompt being followed. It injects **once** per
+  handoff and only if it's recent (`HUD_ROLLOVER_INJECT_MAXAGE`, default 15 min),
+  so old handoffs never leak into unrelated future sessions.
+- **Seed prompt.** The new session is also told to read the handoff file first.
+  Belt and suspenders — even if the SessionStart hook isn't active, the prompt
+  still points the agent at the handoff.
 
 ---
 
@@ -127,6 +138,7 @@ Set env vars in the hook command inside `~/.claude/settings.json`
 | `HUD_ROLLOVER_SEED` | _(auto)_ | Override the seed prompt for the new session |
 | `HUD_ROLLOVER_HANDOFF_PATH` | `.claude/rollover-handoff.md` | Repo-relative path for the generated handoff |
 | `HUD_ROLLOVER_NO_GITIGNORE` | _off_ | Don't add the handoff path to `.git/info/exclude` |
+| `HUD_ROLLOVER_INJECT_MAXAGE` | `900` | SessionStart injects the handoff only if newer than this (seconds) |
 | `HUD_ROLLOVER_REFRESH_HANDOFF` | _off_ | Run a repo handoff refresher before spawning (repo-harness) |
 | `HUD_ROLLOVER_DRYRUN=1` | _off_ | Decide + log to stderr, but never spawn or stop |
 | `HUD_ROLLOVER_DISABLE=1` | _off_ | Hard off for that invocation |

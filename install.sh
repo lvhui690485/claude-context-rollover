@@ -12,8 +12,10 @@ set -euo pipefail
 CONFIG_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
 HERE="$(cd "$(dirname "$0")" && pwd)"
 SRC="$HERE/hooks/hud-context-rollover.sh"
+SRC_SS="$HERE/hooks/session-start-handoff.sh"
 DEST_DIR="$CONFIG_DIR/hooks"
 DEST="$DEST_DIR/hud-context-rollover.sh"
+DEST_SS="$DEST_DIR/session-start-handoff.sh"
 SETTINGS="$CONFIG_DIR/settings.json"
 
 COOLDOWN="${HUD_ROLLOVER_COOLDOWN:-300}"   # conservative default for first run
@@ -25,6 +27,13 @@ echo "→ installing hook script to $DEST"
 mkdir -p "$DEST_DIR"
 cp "$SRC" "$DEST"
 chmod +x "$DEST"
+
+# SessionStart companion: injects the handoff into the new session's context
+if [ -f "$SRC_SS" ]; then
+  echo "→ installing SessionStart hook to $DEST_SS"
+  cp "$SRC_SS" "$DEST_SS"
+  chmod +x "$DEST_SS"
+fi
 
 # helper that builds the self-contained handoff from the transcript + git state
 if [ -d "$HERE/hooks/lib" ]; then
@@ -44,26 +53,31 @@ echo "→ backed up settings.json to $SETTINGS.bak-rollover-$ts"
 
 CMD="HUD_ROLLOVER_COOLDOWN=$COOLDOWN $DEST"
 
-CMD="$CMD" SETTINGS="$SETTINGS" python3 - <<'PY'
-import json, os, sys
+CMD="$CMD" CMD_SS="$DEST_SS" SETTINGS="$SETTINGS" python3 - <<'PY'
+import json, os
 settings = os.environ["SETTINGS"]
 cmd = os.environ["CMD"]
+cmd_ss = os.environ["CMD_SS"]
 with open(settings) as f:
     data = json.load(f)
 hooks = data.setdefault("hooks", {})
-arr = hooks.setdefault("PostToolUse", [])
 
-# remove any prior rollover registration so re-install is idempotent
-def is_ours(entry):
-    return any("hud-context-rollover.sh" in (h.get("command") or "")
-               for h in entry.get("hooks", []))
-arr[:] = [e for e in arr if not is_ours(e)]
+def register(event, command, needle):
+    arr = hooks.setdefault(event, [])
+    # remove any prior registration of ours so re-install is idempotent
+    arr[:] = [e for e in arr
+              if not any(needle in (h.get("command") or "") for h in e.get("hooks", []))]
+    arr.append({"matcher": "", "hooks": [{"type": "command", "command": command}]})
 
-arr.append({"matcher": "", "hooks": [{"type": "command", "command": cmd}]})
+register("PostToolUse", cmd, "hud-context-rollover.sh")
+if os.path.exists(cmd_ss):
+    register("SessionStart", cmd_ss, "session-start-handoff.sh")
+
 with open(settings, "w") as f:
     json.dump(data, f, indent=2, ensure_ascii=False)
     f.write("\n")
-print("→ registered PostToolUse hook:", cmd)
+print("→ registered PostToolUse:", cmd)
+print("→ registered SessionStart:", cmd_ss)
 PY
 
 # remove any stale kill switch so the hook is actually armed
