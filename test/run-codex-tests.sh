@@ -22,7 +22,7 @@ mkdir -p "$CH/sessions/2026/06/16" "$REPO"
 ( cd "$REPO" && git init -q && git config user.email t@t && git config user.name t )
 ROLL="$CH/sessions/2026/06/16/rollout-test.jsonl"
 cat > "$ROLL" <<JSONL
-{"timestamp":"t","type":"session_meta","payload":{"id":"sid-test","cwd":"$REPO"}}
+{"timestamp":"t","type":"session_meta","payload":{"id":"sid-test","cwd":"$REPO","source":"cli"}}
 {"timestamp":"t","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"CODEX_TASK_MARKER refactor the mapper layer to async"}]}}
 {"timestamp":"t","type":"response_item","payload":{"type":"function_call","name":"update_plan","arguments":"{\"plan\":[{\"step\":\"PLAN_STEP_ONE\",\"status\":\"in_progress\"},{\"step\":\"PLAN_STEP_TWO\",\"status\":\"pending\"}]}"}}
 {"timestamp":"t","type":"response_item","payload":{"type":"custom_tool_call","name":"apply_patch","input":"*** Begin Patch\n*** Update File: src/Mapper.java\n@@\n-old\n+new\n*** End Patch"}}
@@ -57,6 +57,18 @@ rm -f "$CH/rollover-state/fired-"*
 out4=$(CODEX_HOME="$CH" CODEX_ROLLOVER_ONCE=1 CODEX_ROLLOVER_DRYRUN=1 \
        CODEX_ROLLOVER_IDLE=0 CODEX_ROLLOVER_THRESHOLD=60 bash "$WATCH" 2>&1)
 [ -z "$out4" ] && ok "halted by kill switch" || no "ran despite DISABLED"
+
+echo "Esrc) non-interactive source (exec/subagent/vscode) is skipped"
+EROLL="$CH/sessions/2026/06/16/rollout-exec.jsonl"
+sed 's/"source":"cli"/"source":"exec"/' "$ROLL" > "$EROLL"
+touch "$EROLL"
+# point ONLY at the exec session by removing the cli one for this check
+mv "$ROLL" "$ROLL.bak"
+rm -f "$CH/rollover-state/DISABLED" "$CH/rollover-state/fired-"*
+out5=$(CODEX_HOME="$CH" CODEX_ROLLOVER_ONCE=1 CODEX_ROLLOVER_DRYRUN=1 \
+       CODEX_ROLLOVER_IDLE=0 CODEX_ROLLOVER_THRESHOLD=60 bash "$WATCH" 2>&1)
+[ -z "$out5" ] && ok "exec/subagent/app source not rolled over" || no "rolled over a non-cli source"
+mv "$ROLL.bak" "$ROLL"; rm -f "$EROLL"
 
 echo "E) spawned codex env is guarded (CODEX_HOME auth fallback + tuning unset)"
 grep -q 'auth.json" \] && unset CODEX_HOME' "$WATCH" && ok "CODEX_HOME auth guard present" || no "missing CODEX_HOME guard"

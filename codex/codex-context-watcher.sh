@@ -58,10 +58,15 @@ log(){ rollover_log "$LOG" "$*"; }
 
 # read a session file's: used% , cwd , session-id  (one line, tab-separated)
 read_session() {
-  "$PY" - "$1" <<'PY'
+  CODEX_ROLLOVER_SOURCES="${CODEX_ROLLOVER_SOURCES:-cli}" "$PY" - "$1" <<'PY'
 import json, os, sys
 path = sys.argv[1]
 cwd = sid = win = cur = None
+
+# Only roll over the session sources we want. Default 'cli' = the interactive
+# TUI; exec/subagent/vscode(Desktop) sessions are non-interactive or run in a
+# different surface, so opening a fresh CLI window for them is wrong.
+allowed = set(s.strip() for s in os.environ.get("CODEX_ROLLOVER_SOURCES", "cli").split(",") if s.strip())
 
 # session_meta is at the top: scan the head and stop once found (don't parse the
 # whole — possibly multi-MB — file on every poll).
@@ -74,6 +79,9 @@ try:
                 continue
             if o.get("type") == "session_meta":
                 p = o.get("payload", {})
+                src = p.get("source")
+                if not isinstance(src, str) or src not in allowed:
+                    sys.exit(0)   # not an interactive CLI session — skip
                 cwd = p.get("cwd"); sid = p.get("id")
                 break
             if i > 200:

@@ -212,9 +212,15 @@ different trigger, because Codex has no per-tool hook.
 ./uninstall-codex.sh
 ```
 
+By default it only rolls over **interactive CLI sessions** (`source=cli`).
+`codex exec`, subagent, and `vscode`/Codex Desktop sessions live in the same
+`~/.codex/sessions/` but are non-interactive or run in another surface, so
+opening a fresh CLI window for them would be wrong — they're skipped. Override
+with `CODEX_ROLLOVER_SOURCES` (comma-separated, e.g. `cli,vscode`).
+
 Same safety nets as the Claude side (per-session latch, global cooldown, burst
 auto-disable, `DISABLED` kill switch), under `~/.codex/rollover-state/`. Knobs are
-`CODEX_ROLLOVER_THRESHOLD` / `_POLL` / `_IDLE` / `_COOLDOWN` / `_SEED`.
+`CODEX_ROLLOVER_THRESHOLD` / `_POLL` / `_IDLE` / `_COOLDOWN` / `_SOURCES` / `_SEED`.
 
 ## Limitations
 
