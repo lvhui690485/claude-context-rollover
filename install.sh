@@ -26,6 +26,13 @@ mkdir -p "$DEST_DIR"
 cp "$SRC" "$DEST"
 chmod +x "$DEST"
 
+# helper that builds the self-contained handoff from the transcript + git state
+if [ -d "$HERE/hooks/lib" ]; then
+  echo "→ installing handoff helper to $DEST_DIR/lib/"
+  mkdir -p "$DEST_DIR/lib"
+  cp "$HERE/hooks/lib/"*.py "$DEST_DIR/lib/" 2>/dev/null || true
+fi
+
 if [ ! -f "$SETTINGS" ]; then
   echo "→ creating $SETTINGS"
   printf '{\n  "hooks": {}\n}\n' > "$SETTINGS"

@@ -13,10 +13,37 @@ At a configurable threshold (default **60%** of the context window), this hook:
 You keep working in the new window. The baton is passed. No manual `/compact`, no
 copy-pasting context, no babysitting.
 
-> Works best with a **file-backed handoff** in your repo (e.g.
-> [repo-harness](https://github.com/Ancienttwo/repo-harness)'s `resume.md`,
-> injected on `SessionStart`). Without one it falls back to telling the new
-> session to reconstruct state from `git log/status` and any task files.
+The new session has **no memory** of the old conversation (that's the point —
+lean context). So the handoff is file-backed; see below for how the new window
+knows what to continue.
+
+---
+
+## Handoff: how the new window knows what to continue
+
+Since the new session starts fresh, the task state has to reach it through files,
+not memory. The hook picks the richest handoff available, in this order:
+
+1. **`HUD_ROLLOVER_SEED`** — if you set it, that string is the new session's
+   prompt verbatim.
+2. **repo-harness handoff** — if `.ai/harness/handoff/resume.md` exists
+   ([repo-harness](https://github.com/Ancienttwo/repo-harness) writes it
+   continuously and injects it on `SessionStart`), the new session is pointed at
+   it plus `tasks/current.md`. Most precise.
+3. **Self-contained handoff (built in, no dependencies)** — otherwise the hook
+   reads the **current session's transcript** and writes
+   `~/.claude/state/hud-rollover/handoff-<id>.md` capturing:
+   - the most recent **human requests** (the actual task intent),
+   - the previous session's **last message** (usually "next I'll…"),
+   - **recent actions** and the **files it edited**,
+   - the **git diff/status** at the moment of handoff (the in-progress work).
+
+   The new session is told to read that file first, then continue. So even a
+   half-finished refactor in a plain repo rolls over with the task, the plan,
+   and the diff intact.
+
+This file lives outside your repo (under `~/.claude/state/`), so it never
+pollutes your working tree or git.
 
 ---
 

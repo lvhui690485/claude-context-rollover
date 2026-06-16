@@ -99,15 +99,23 @@ stamp="$(date '+%F %T' 2>/dev/null)"
 now_epoch="$(date +%s 2>/dev/null)"
 
 # --- adaptive seed prompt for the new (lean) session -------------------------
-# Override entirely with HUD_ROLLOVER_SEED. Otherwise detect a repo-harness
-# handoff and tailor the prompt; else fall back to a generic git/tasks prompt.
+# Priority: HUD_ROLLOVER_SEED override > repo-harness resume.md > self-contained
+# handoff auto-generated from the transcript + git state.
 resume_file="$cwd/.ai/harness/handoff/resume.md"
+SELF_DIR="$(cd "$(dirname "$0")" 2>/dev/null && pwd)"
+handoff_gen="$SELF_DIR/lib/rollover-handoff.py"
+[ -f "$handoff_gen" ] || handoff_gen="$CONFIG_DIR/hooks/lib/rollover-handoff.py"
+handoff_file="$LATCH_DIR/handoff-$hash.md"
+
 if [ -n "${HUD_ROLLOVER_SEED:-}" ]; then
   seed="$HUD_ROLLOVER_SEED"
 elif [ -f "$resume_file" ]; then
   seed="The previous session reached ${used}% context and handed off to this window. First read .ai/harness/handoff/resume.md and tasks/current.md, reconcile against the live repo (active plan, git status), then continue from the next step. Do not redo completed work."
+elif [ -f "$handoff_gen" ] && "$PY" "$handoff_gen" "$transcript" "$cwd" "$used" "$handoff_file" >/dev/null 2>&1 && [ -s "$handoff_file" ]; then
+  # self-contained handoff written from the transcript + git state
+  seed="The previous session reached ${used}% context and handed off to this window. First read the handoff file at $handoff_file (it captures the task, recent actions, files touched, and the git diff), then continue the in-progress work from where it left off. Do not redo completed work."
 else
-  seed="The previous session reached ${used}% context and handed off to this window. Reconstruct where it left off from git log/status and any task or handoff files in the repo, then continue from the next step."
+  seed="The previous session reached ${used}% context and handed off to this window. Reconstruct where it left off from git log/status and the uncommitted diff, then continue from the next step. Do not redo completed work."
 fi
 
 # Make the seed safe inside single quotes regardless of its content.

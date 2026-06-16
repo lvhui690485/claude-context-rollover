@@ -52,6 +52,20 @@ mkcache 99
 out=$(run f | CLAUDE_CONFIG_DIR="$T" HUD_ROLLOVER_THRESHOLD=1 "$HOOK" 2>&1)
 [ -z "$out" ] && ok "halted by kill switch" || no "fired despite DISABLED"
 
+echo "G) self-contained handoff generated from transcript (dry-run)"
+rm -f "$T/state/hud-rollover/DISABLED"
+cat > "$faketx" <<'JSONL'
+{"type":"user","message":{"role":"user","content":[{"type":"text","text":"REFACTOR_TASK_MARKER refactor the auth module to async/await"}]}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"working on it"},{"type":"tool_use","name":"Edit","input":{"file_path":"src/auth/login.ts"}}]}}
+JSONL
+mkcache 70
+nc=$(run g | CLAUDE_CONFIG_DIR="$T" HUD_ROLLOVER_DRYRUN=1 "$HOOK" 2>&1 | grep "would run")
+hf="$T/state/hud-rollover/handoff-$h.md"
+[ -s "$hf" ] && ok "handoff file written" || no "no handoff file"
+grep -q "REFACTOR_TASK_MARKER" "$hf" 2>/dev/null && ok "task captured in handoff" || no "task missing"
+grep -q "src/auth/login.ts" "$hf" 2>/dev/null && ok "edited file captured" || no "file missing"
+echo "$nc" | grep -q "handoff-$h.md" && ok "seed points at handoff" || no "seed missing handoff path"
+
 rm -rf "$T"
 echo "-----"
 echo "pass=$pass fail=$fail"

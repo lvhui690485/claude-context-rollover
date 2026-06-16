@@ -36,4 +36,6 @@ PY
 fi
 
 rm -f "$DEST" 2>/dev/null && echo "→ removed $DEST" || true
+rm -f "$CONFIG_DIR/hooks/lib/rollover-handoff.py" 2>/dev/null || true
+rmdir "$CONFIG_DIR/hooks/lib" 2>/dev/null || true
 echo "✅ uninstalled. State/logs left under $CONFIG_DIR/state/hud-rollover/ (delete manually if you want)."
