@@ -104,6 +104,8 @@ now_epoch="$(date +%s 2>/dev/null)"
 # handoff auto-generated from the transcript + git state.
 resume_file="$cwd/.ai/harness/handoff/resume.md"
 SELF_DIR="$(cd "$(dirname "$0")" 2>/dev/null && pwd)"
+CORE="$SELF_DIR/lib/rollover-core.sh"; [ -f "$CORE" ] || CORE="$CONFIG_DIR/hooks/lib/rollover-core.sh"
+. "$CORE" 2>/dev/null || { echo "[hud-rollover] missing rollover-core.sh" >&2; rm -f "$latch" 2>/dev/null; exit 0; }
 handoff_gen="$SELF_DIR/lib/rollover-handoff.py"
 [ -f "$handoff_gen" ] || handoff_gen="$CONFIG_DIR/hooks/lib/rollover-handoff.py"
 # repo-local, stable, visible path (like repo-harness's resume.md)
@@ -114,19 +116,9 @@ if [ -n "${HUD_ROLLOVER_SEED:-}" ]; then
   seed="$HUD_ROLLOVER_SEED"
 elif [ -f "$resume_file" ]; then
   seed="The previous session reached ${used}% context and handed off to this window. First read .ai/harness/handoff/resume.md and tasks/current.md, reconcile against the live repo (active plan, git status), then continue from the next step. Do not redo completed work."
-elif [ -f "$handoff_gen" ] && mkdir -p "$(dirname "$handoff_file")" 2>/dev/null && "$PY" "$handoff_gen" "$transcript" "$cwd" "$used" "$handoff_file" >/dev/null 2>&1 && [ -s "$handoff_file" ]; then
-  # self-contained handoff written into the repo (transcript + git state).
-  # Keep git clean without touching a tracked .gitignore: use info/exclude.
-  # `[ -e .git ]` (file in worktrees, dir in normal repos) + rev-parse resolves
-  # the correct exclude path in both layouts.
-  if [ -e "$cwd/.git" ] && [ -z "${HUD_ROLLOVER_NO_GITIGNORE:-}" ]; then
-    excl="$(git -C "$cwd" rev-parse --git-path info/exclude 2>/dev/null)"
-    if [ -n "$excl" ]; then
-      case "$excl" in /*) :;; *) excl="$cwd/$excl";; esac
-      mkdir -p "$(dirname "$excl")" 2>/dev/null
-      grep -qxF "$handoff_rel" "$excl" 2>/dev/null || printf '%s\n' "$handoff_rel" >> "$excl" 2>/dev/null || true
-    fi
-  fi
+elif rollover_make_handoff "$PY" "$handoff_gen" "$transcript" "$cwd" "$used" "$handoff_file"; then
+  # self-contained handoff written into the repo; keep git clean via info/exclude.
+  [ -z "${HUD_ROLLOVER_NO_GITIGNORE:-}" ] && rollover_git_exclude "$cwd" "$handoff_rel"
   seed="The previous session reached ${used}% context and handed off to this window. First read the handoff file ./$handoff_rel (it captures the task, recent actions, files touched, and the git diff), then continue the in-progress work from where it left off. Do not redo completed work."
 else
   seed="The previous session reached ${used}% context and handed off to this window. Reconstruct where it left off from git log/status and the uncommitted diff, then continue from the next step. Do not redo completed work."
@@ -179,18 +171,7 @@ fi
 # If >= MAXBURST spawns were logged in the last 10 minutes, something is looping:
 # write the kill switch and stop. Re-arm by deleting the DISABLED file.
 MAXBURST="${HUD_ROLLOVER_MAX_BURST:-5}"
-recent="$("$PY" -c '
-import sys,time,datetime
-log,now=sys.argv[1],int(sys.argv[2]); c=0
-try:
-    for ln in open(log):
-        if " SPAWN " not in ln: continue
-        try:
-            ep=time.mktime(datetime.datetime.strptime(ln[:19],"%Y-%m-%d %H:%M:%S").timetuple())
-            if ep>=now-600: c+=1
-        except Exception: pass
-except FileNotFoundError: pass
-print(c)' "$LOG" "$now_epoch" 2>/dev/null)"
+recent="$(rollover_recent_spawns "$LOG" "$now_epoch" "$PY")"
 case "$recent" in ''|*[!0-9]*) recent=0;; esac
 if [ "$recent" -ge "$MAXBURST" ]; then
   : > "$LATCH_DIR/DISABLED" 2>/dev/null
@@ -210,48 +191,7 @@ fi
 
 # --- spawn the new view (tmux > iTerm2 > Ghostty > Apple Terminal) ------------
 spawned=0
-if [ -n "${TMUX:-}" ]; then
-  if tmux split-window -h -c "$cwd" "$newcmd" 2>/dev/null \
-     || { tmux split-window -h -c "$cwd" 2>/dev/null && tmux send-keys "$newcmd" Enter 2>/dev/null; }; then
-    spawned=1
-  fi
-fi
-
-if [ "$spawned" -eq 0 ] && [ "${TERM_PROGRAM:-}" = "iTerm.app" ]; then
-  if osascript \
-      -e 'on run argv' \
-      -e 'set cmd to item 1 of argv' \
-      -e 'tell application "iTerm"' \
-      -e '  activate' \
-      -e '  tell current session of current window to set s to (split vertically with default profile)' \
-      -e '  tell s to write text cmd' \
-      -e 'end tell' \
-      -e 'end run' \
-      "$newcmd" >/dev/null 2>&1; then
-    spawned=1
-  fi
-fi
-
-# Ghostty has no split API, but `open -na Ghostty.app --args -e <cmd>` opens a window.
-if [ "$spawned" -eq 0 ] && { [ "${TERM_PROGRAM:-}" = "ghostty" ] || [ -d "/Applications/Ghostty.app" ]; }; then
-  if open -na Ghostty.app --args -e zsh -lc "$newcmd" >/dev/null 2>&1; then
-    spawned=1
-  fi
-fi
-
-if [ "$spawned" -eq 0 ]; then
-  if osascript \
-      -e 'on run argv' \
-      -e 'set cmd to item 1 of argv' \
-      -e 'tell application "Terminal"' \
-      -e '  activate' \
-      -e '  do script cmd' \
-      -e 'end tell' \
-      -e 'end run' \
-      "$newcmd" >/dev/null 2>&1; then
-    spawned=1
-  fi
-fi
+rollover_spawn "$cwd" "$newcmd" && spawned=1
 
 # --- stop THIS session only if the handoff window actually opened -------------
 if [ "$spawned" -eq 1 ]; then

@@ -35,11 +35,11 @@ if [ -f "$SRC_SS" ]; then
   chmod +x "$DEST_SS"
 fi
 
-# helper that builds the self-contained handoff from the transcript + git state
+# shared lib: handoff generator (.py) + core helpers (.sh) the hook sources
 if [ -d "$HERE/hooks/lib" ]; then
-  echo "→ installing handoff helper to $DEST_DIR/lib/"
+  echo "→ installing lib helpers to $DEST_DIR/lib/"
   mkdir -p "$DEST_DIR/lib"
-  cp "$HERE/hooks/lib/"*.py "$DEST_DIR/lib/" 2>/dev/null || true
+  cp "$HERE/hooks/lib/"*.py "$HERE/hooks/lib/"*.sh "$DEST_DIR/lib/" 2>/dev/null || true
 fi
 
 if [ ! -f "$SETTINGS" ]; then

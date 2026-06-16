@@ -42,6 +42,8 @@ SELF_DIR="$(cd "$(dirname "$0")" && pwd)"
 HANDOFF_GEN="$SELF_DIR/../hooks/lib/rollover-handoff.py"
 [ -f "$HANDOFF_GEN" ] || HANDOFF_GEN="$SELF_DIR/rollover-handoff.py"
 PY="$(command -v python3 || echo /usr/bin/python3)"
+CORE="$SELF_DIR/../hooks/lib/rollover-core.sh"; [ -f "$CORE" ] || CORE="$SELF_DIR/rollover-core.sh"
+. "$CORE" 2>/dev/null || { echo "codex-context-watcher: missing rollover-core.sh" >&2; exit 1; }
 
 THRESHOLD="${CODEX_ROLLOVER_THRESHOLD:-60}"
 POLL="${CODEX_ROLLOVER_POLL:-8}"
@@ -52,7 +54,7 @@ MAXBURST="${CODEX_ROLLOVER_MAX_BURST:-5}"
 
 mkdir -p "$STATE_DIR" 2>/dev/null
 
-log(){ printf '%s %s\n' "$(date '+%F %T')" "$*" >> "$LOG" 2>/dev/null; }
+log(){ rollover_log "$LOG" "$*"; }
 
 # read a session file's: used% , cwd , session-id  (one line, tab-separated)
 read_session() {
@@ -118,19 +120,11 @@ spawn_codex() {
   # never let the watcher's tuning env leak into the spawned session
   sani='unset CODEX_ROLLOVER_THRESHOLD CODEX_ROLLOVER_POLL CODEX_ROLLOVER_IDLE CODEX_ROLLOVER_ACTIVE CODEX_ROLLOVER_COOLDOWN CODEX_ROLLOVER_MAX_BURST CODEX_ROLLOVER_SEED CODEX_ROLLOVER_ONCE CODEX_ROLLOVER_DRYRUN CODEX_ROLLOVER_STATE CODEX_ROLLOVER_HANDOFF_PATH'
   newcmd="$guard; $sani; cd $(printf '%q' "$cwd") && codex '$esc'"
-  if [ -n "${TMUX:-}" ] && tmux split-window -h -c "$cwd" "$newcmd" 2>/dev/null; then return 0; fi
-  if [ "${TERM_PROGRAM:-}" = "iTerm.app" ] && osascript \
-      -e 'on run argv' -e 'tell application "iTerm"' -e 'activate' \
-      -e 'tell current session of current window to set s to (split vertically with default profile)' \
-      -e 'tell s to write text (item 1 of argv)' -e 'end tell' -e 'end run' "$newcmd" >/dev/null 2>&1; then return 0; fi
-  if { [ "${TERM_PROGRAM:-}" = "ghostty" ] || [ -d /Applications/Ghostty.app ]; } && \
-      open -na Ghostty.app --args -e zsh -lc "$newcmd" >/dev/null 2>&1; then return 0; fi
-  osascript -e 'on run argv' -e 'tell application "Terminal"' -e 'activate' \
-      -e 'do script (item 1 of argv)' -e 'end tell' -e 'end run' "$newcmd" >/dev/null 2>&1
+  rollover_spawn "$cwd" "$newcmd"
 }
 
 handle_session() {
-  local f="$1" now mtime age info pct cwd sid
+  local f="$1" now mtime age info pct cwd sid rest
   now="$(date +%s)"
   mtime="$(stat -f %m "$f" 2>/dev/null || stat -c %Y "$f" 2>/dev/null)"
   case "$mtime" in ''|*[!0-9]*) return 0;; esac
@@ -165,18 +159,7 @@ handle_session() {
   fi
   # burst auto-disable
   local recent
-  recent="$("$PY" -c '
-import sys,time,datetime
-log,now=sys.argv[1],int(sys.argv[2]); c=0
-try:
-    for ln in open(log):
-        if " SPAWN " not in ln: continue
-        try:
-            ep=time.mktime(datetime.datetime.strptime(ln[:19],"%Y-%m-%d %H:%M:%S").timetuple())
-            if ep>=now-600: c+=1
-        except Exception: pass
-except FileNotFoundError: pass
-print(c)' "$LOG" "$now" 2>/dev/null)"
+  recent="$(rollover_recent_spawns "$LOG" "$now" "$PY")"
   case "$recent" in ''|*[!0-9]*) recent=0;; esac
   if [ "$recent" -ge "$MAXBURST" ]; then : > "$STATE_DIR/DISABLED"; log "AUTO-DISABLE burst=$recent"; return 0; fi
 
@@ -185,16 +168,8 @@ print(c)' "$LOG" "$now" 2>/dev/null)"
   # generate handoff into the repo (same path scheme as the Claude side)
   local rel="${CODEX_ROLLOVER_HANDOFF_PATH:-.claude/rollover-handoff.md}"
   local hf="$cwd/$rel" seed
-  mkdir -p "$(dirname "$hf")" 2>/dev/null
-  if [ -f "$HANDOFF_GEN" ] && "$PY" "$HANDOFF_GEN" "$f" "$cwd" "$pct" "$hf" >/dev/null 2>&1 && [ -s "$hf" ]; then
-    if [ -e "$cwd/.git" ]; then   # file in worktrees, dir in normal repos
-      excl="$(git -C "$cwd" rev-parse --git-path info/exclude 2>/dev/null)"
-      if [ -n "$excl" ]; then
-        case "$excl" in /*) :;; *) excl="$cwd/$excl";; esac
-        mkdir -p "$(dirname "$excl")" 2>/dev/null
-        grep -qxF "$rel" "$excl" 2>/dev/null || printf '%s\n' "$rel" >> "$excl" 2>/dev/null || true
-      fi
-    fi
+  if rollover_make_handoff "$PY" "$HANDOFF_GEN" "$f" "$cwd" "$pct" "$hf"; then
+    [ -z "${CODEX_ROLLOVER_NO_GITIGNORE:-}" ] && rollover_git_exclude "$cwd" "$rel"
     seed="${CODEX_ROLLOVER_SEED:-The previous codex session reached ${pct}% context and handed off to this window. First read ./$rel (task, plan, recent actions, edited files, git diff), then continue the in-progress work from where it left off. Do not redo completed work.}"
   else
     seed="${CODEX_ROLLOVER_SEED:-The previous codex session reached ${pct}% context and handed off to this window. Reconstruct from git status/diff and continue from the next step. Do not redo completed work.}"

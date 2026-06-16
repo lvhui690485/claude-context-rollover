@@ -26,6 +26,7 @@ echo "→ installing watcher + handoff helper to $DEST"
 mkdir -p "$DEST"
 cp "$HERE/codex/codex-context-watcher.sh" "$DEST/codex-context-watcher.sh"
 cp "$HERE/hooks/lib/rollover-handoff.py"  "$DEST/rollover-handoff.py"
+cp "$HERE/hooks/lib/rollover-core.sh"     "$DEST/rollover-core.sh"
 chmod +x "$DEST/codex-context-watcher.sh"
 rm -f "$DEST/../rollover-state/DISABLED" 2>/dev/null || true
 
