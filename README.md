@@ -72,7 +72,7 @@ PostToolUse ─▶ read claude-hud cache for this session
 ## Install
 
 ```bash
-git clone https://github.com/<you>/claude-context-rollover
+git clone https://github.com/lvhui690485/claude-context-rollover
 cd claude-context-rollover
 ./install.sh
 ```
